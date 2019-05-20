@@ -3,7 +3,7 @@
   <groupId>com.qiuzhisystem</groupId>
   <artifactId>JarsCrawler</artifactId>
   <version>0.0.1-SNAPSHOT</version>
-  <packaging>war</packaging>
+  <packaging>jar</packaging>
    <dependencies>
   
   	<!-- 添加Httpclient支持 -->
