@@ -1,16 +1,20 @@
 package com.qiuzhisystem.crawler;
 
 import java.io.BufferedReader;
-import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.text.ParseException;
 import java.util.LinkedList;
 import java.util.Queue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadPoolExecutor;
 
 import org.apache.http.HttpEntity;
 import org.apache.http.client.ClientProtocolException;
+import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.impl.client.CloseableHttpClient;
@@ -33,7 +37,9 @@ public class StartCrawer {
 	//需要过滤的url
 	public static String[] excludeUrl = new String[] {".pom", ".xml", ".md5", ".sha1", ".asc", ".gz", ".zip", "../"};
 	public static Queue<String> waitForCrawlerUrls = new LinkedList<String>();//等待爬取url
-	public static int total = 0;
+	private static int total = 0;
+	
+	private static boolean exeFlag = true;
 	
  	/**
 	 * 解析网页内容
@@ -91,50 +97,73 @@ public class StartCrawer {
 	 * @param url
 	 */
 	public static void parseUrl() {
-//		System.out.println("url:" + url);
-		while(waitForCrawlerUrls.size() > 0) {
-			String url = waitForCrawlerUrls.poll();//摘取，先进先出
-			logger.info("执行解析url：" + url);
-			CloseableHttpClient httpClient = HttpClients.createDefault();//创建httpClient实例，可关闭
-			//反射
-			HttpGet httpGet = new HttpGet(url);//通过反射获取httpGet实例
-			CloseableHttpResponse response = null;//可关闭的HttpResponse，节省资源
-			try {
-				response = httpClient.execute(httpGet);
-				HttpEntity entity = response.getEntity();//获取返回实体
-				if("text/html".equals(entity.getContentType().getValue())) {//过滤掉其他不需要的软件
-					String webPageContent = EntityUtils.toString(entity, "utf-8");
-					System.out.println("网页内容" + webPageContent);
-					//提取url
-					parseWebPage(webPageContent, url);
-				}
-			} catch (ClientProtocolException e) {
-				logger.error("ClientProtocolException", e);
-				//出现异常重新添加
-				addUrl(url,"由于异常");
-			} catch (IOException e) {
-				logger.error("IOException", e);
-				addUrl(url,"由于异常");
-			}finally {
-				if(response != null) {
-					try {
-						response.close();
-					} catch (IOException e) {
-						logger.error("IOException", e);
+//		定义一个线程池 	Executors  java内置线程池
+		ExecutorService executorService = Executors.newFixedThreadPool(10);
+		while(exeFlag) {
+			if(waitForCrawlerUrls.size() > 0) {
+				executorService.execute(new Runnable() {
+					public void run() {
+						String url = waitForCrawlerUrls.poll();//摘取，先进先出
+						if(url == null || "".equals(url)) {
+							return;
+						}
+						logger.info("执行解析url：" + url);
+						RequestConfig requestConfig = RequestConfig.custom().setSocketTimeout(100000)//设置读取时间
+											  .setConnectTimeout(50000)//设置连接超时时间
+											  .build();
+						CloseableHttpClient httpClient = HttpClients.createDefault();//创建httpClient实例，可关闭
+						//反射
+						HttpGet httpGet = new HttpGet(url);//通过反射获取httpGet实例
+						httpGet.setConfig(requestConfig);
+						CloseableHttpResponse response = null;//可关闭的HttpResponse，节省资源
+						try {
+							response = httpClient.execute(httpGet);
+						} catch (ClientProtocolException e) {
+							logger.error("ClientProtocolException", e);
+							//出现异常重新添加
+							addUrl(url,"由于异常");
+						} catch (IOException e) {
+							logger.error("IOException", e);
+							addUrl(url,"由于异常");
+						}
+						if(response != null) {
+							HttpEntity entity = response.getEntity();//获取返回实体
+							if("text/html".equals(entity.getContentType().getValue())) {//过滤掉其他不需要的软件
+								String webPageContent = null;
+								try {
+									webPageContent = EntityUtils.toString(entity, "utf-8");
+									logger.info("网页内容" + webPageContent);
+									//提取url
+									parseWebPage(webPageContent, url);
+								} catch (IOException e) {
+									logger.error("IOException", e);
+									addUrl(url,"由于异常");
+								}
+							} 
+							try {
+								response.close();
+							} catch (IOException e) {
+								logger.error("IOException", e);
+								addUrl(url,"由于异常");
+							}
+						}else {
+							logger.info("连接超时");
+							addUrl(url,"由于异常");
+						}
 					}
-				}
-				try {
-					httpClient.close();
-				} catch (IOException e) {
-					logger.error("IOException", e);
+				});
+			}else {
+				//如果活动线程为0，说明所有线程都已经没有在工作，则关闭线程
+				if(((ThreadPoolExecutor)executorService).getActiveCount() == 0) {
+					executorService.shutdown();//释放所有的资源
+					exeFlag=false;
+					logger.info("爬虫任务完成");
 				}
 			}
-			
 			try {
-				Thread.sleep(3000);//线程休息两秒
-				System.out.println("线程休息三秒");
+				Thread.sleep(1000);
 			} catch (InterruptedException e) {
-				logger.error("InterruptedException", e);
+				logger.error("线程休眠报错",e);
 			}
 		}
 	}
@@ -171,7 +200,6 @@ public class StartCrawer {
 			}
 		}
 		logger.info("完成读取爬虫配置文件");
-		addUrl("http://central.maven.org/maven2/HTTPClient/HTTPClient/", "初始化");
 	}
 	
 	
