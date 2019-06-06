@@ -5,9 +5,14 @@ import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.text.ParseException;
 import java.util.LinkedList;
 import java.util.Queue;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -26,6 +31,8 @@ import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
+import com.qiuzhisystem.utils.DbUtil;
+
 /**
  * 爬虫起始类
  * @author 12952
@@ -41,11 +48,12 @@ public class StartCrawer {
 	
 	private static boolean exeFlag = true;
 	
+	private static Connection con = null;
  	/**
 	 * 解析网页内容
 	 * @param webPageContent
 	 */
-	public static void parseWebPage(String webPageContent, String realPath) {
+	public static void  parseWebPage(String webPageContent, String realPath) {
 		if("".equals(webPageContent)) {
 			return;
 		}
@@ -71,7 +79,36 @@ public class StartCrawer {
 				if(url.endsWith(".jar")) {
 					total++;
 					logger.info("发现第"+ total +"个目标" + (realPath + url));
-					
+					String sql = "select * from t_jar where name=?";
+					try {
+						PreparedStatement pstmt = con.prepareStatement(sql);
+						pstmt.setString(1, url);
+						ResultSet rs = pstmt.executeQuery();
+						if(rs.next()) {
+							logger.info("["+url+"]数据库已存在");
+							continue;
+						}else {
+							String sql2 = "insert into t_jar values(?, ?, ?, now(), ?, 0, 0, 0, 0)";
+							PreparedStatement pstmt2 = con.prepareStatement(sql2);
+							pstmt2.setString(1, UUID.randomUUID().toString());//uuid
+							pstmt2.setString(2, url);//文件名称
+							pstmt2.setString(3, (realPath + url));//路径
+							if(url.endsWith("javadoc.jar")) {
+								pstmt2.setString(4, "javadoc");
+							}else if(url.endsWith("sources.jar")){
+								pstmt2.setString(4, "source");
+							}else {
+								pstmt2.setString(4, "jar");
+							}
+							if(pstmt2.executeUpdate()==1) {
+								logger.info("成功插入数据库");
+							}else {
+								logger.info("插入数据库失败");
+							}
+						}
+					} catch (SQLException e) {
+						logger.error("SQLException",e);
+					}
 				}else {
 					logger.info("爬虫url队列新增url："+ (realPath + url));
 					addUrl(realPath + url, "解析网页");
@@ -89,7 +126,7 @@ public class StartCrawer {
 		if(!waitForCrawlerUrls.contains(url)) {
 			waitForCrawlerUrls.add(url);//加入到爬虫队列里面
 			logger.info("["+info+"]" + url + "添加到爬虫队列");
-			parseUrl();
+//			parseUrl();
 		}
 	}
 	/**
@@ -169,6 +206,14 @@ public class StartCrawer {
 	}
 	
 	private static void init() {
+		DbUtil dbUtil = new DbUtil();
+		try {
+			con = dbUtil.getConn();
+			logger.info("数据库连接成功");
+		} catch (Exception e1) {
+			e1.printStackTrace();
+			logger.info("数据库连接失败");
+		}
 		FileInputStream fis = null;
 		InputStreamReader isr = null;
 		BufferedReader br = null;
@@ -200,6 +245,7 @@ public class StartCrawer {
 			}
 		}
 		logger.info("完成读取爬虫配置文件");
+		parseUrl();
 	}
 	
 	
